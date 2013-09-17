@@ -1,10 +1,24 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax.io.compression;
 
 /**
  * Simple Factory to create Implementations of
  * the {@link ICompressor} interface.
  *
- * @author Andreas Kunft
  */
 public class CompressionCodecs {
 
@@ -26,15 +40,6 @@ public class CompressionCodecs {
         return new LzmaWrapper.Compressor();
     }
 
-    /**
-     * QuickLZ compression instance.
-     *
-     * @return new QuickLZ compression instance.
-     */
-    public static ICompressor getQuickLZ() {
-        return new QuickLZWrapper.Compressor();
-    }
-
     public static ICompressor getLZ4() {
         return new LZ4Wrapper.Compressor();
     }
@@ -51,9 +56,6 @@ public class CompressionCodecs {
         }
         if (compressor instanceof LzmaWrapper.Compressor) {
             return 0x01;
-        }
-        if (compressor instanceof QuickLZWrapper.Compressor) {
-            return 0x02;
         }
         if (compressor instanceof LZ4Wrapper.Compressor) {
             return 0x04;
@@ -74,8 +76,6 @@ public class CompressionCodecs {
                 return new GZipWrapper.Decompressor();
             case 0x01:
                 return new LzmaWrapper.Decompressor();
-            case 0x02:
-                return new QuickLZWrapper.Decompressor();
             case 0x04:
                 return new LZ4Wrapper.Decompressor();
         }

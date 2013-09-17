@@ -1,3 +1,18 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax;
 
 import java.io.BufferedOutputStream;
@@ -35,37 +50,36 @@ import eu.stratosphere.pact.common.type.Value;
  * <p/>
  * For the concrete binary structure, see the paxformat.eps figure in the resources folder.
  *
- * @author Andreas Kunft
  */
 public class IndexedPAXOutputFormat extends FileOutputFormat {
 
     // CONFIGURATION PARAMETERS
 
-    private static final String NUM_COLUMNS_PARAMETER = "pact.output.rc.num-cols";
+    public static final String NUM_COLUMNS_PARAMETER = "pact.output.rc.num-cols";
 
-    private static final String COLUMN_TYPE_PARAMETER_PREFIX = "pact.output.rc.type_";
+    public static final String COLUMN_TYPE_PARAMETER_PREFIX = "pact.output.rc.type_";
 
-    private static final String COLUMN_COMPRESSION_TYPE_PARAMETER_PREFIX = "pact.output.rc.compression_";
+    public static final String COLUMN_COMPRESSION_TYPE_PARAMETER_PREFIX = "pact.output.rc.compression_";
 
-    private static final String RECORD_POSITION_PARAMETER_PREFIX = "pact.output.rc.position_";
+    public static final String RECORD_POSITION_PARAMETER_PREFIX = "pact.output.rc.position_";
 
-    private static final String LENIENT_PARSING = "pact.output.rc.lenient";
+    public static final String LENIENT_PARSING = "pact.output.rc.lenient";
 
-    private static final String ROW_GROUP_SIZE_PARAMETER = "pact.output.rc.rowgroupsize";
+    public static final String ROW_GROUP_SIZE_PARAMETER = "pact.output.rc.rowgroupsize";
 
-    private static final String SORT_COLUMNS_PARAMETER = "pact.output.rc.sorted.column.num";
+    public static final String SORT_COLUMNS_PARAMETER = "pact.output.rc.sorted.column.num";
 
-    private static final String SORT_COLUMN_POSITION_PREFIX = "pact.output.rc.sorted.column_";
+    public static final String SORT_COLUMN_POSITION_PREFIX = "pact.output.rc.sorted.column_";
 
-    private static final String SORT_COLUMN_ASC_PREFIX = "pact.output.rc.sorted.asc_";
+    public static final String SORT_COLUMN_ASC_PREFIX = "pact.output.rc.sorted.asc_";
 
-    private static final String BLOOM_FILTER_COLUMN_PARAMETER = "pact.output.rc.bloomfilter.num";
+    public static final String BLOOM_FILTER_COLUMN_PARAMETER = "pact.output.rc.bloomfilter.num";
 
-    private static final String BLOOM_FILTER_COLUMN_POSITION_PREFIX = "pact.output.rc.bloomfilter.column_";
+    public static final String BLOOM_FILTER_COLUMN_POSITION_PREFIX = "pact.output.rc.bloomfilter.column_";
 
-    private static final String NUMBER_OF_THREADS_PARAMETER = "pact.output.rc.num.threads";
+    public static final String NUMBER_OF_THREADS_PARAMETER = "pact.output.rc.num.threads";
 
-    private static final String DEFAULT_COMPRESSION_TYPE_PARAMETER = "pact.output.rc.default.compression";
+    public static final String DEFAULT_COMPRESSION_TYPE_PARAMETER = "pact.output.rc.default.compression";
 
     // CONSTANTS
 

@@ -1,3 +1,18 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax.selection;
 
 import static junit.framework.Assert.assertEquals;
@@ -12,9 +27,6 @@ import org.junit.Test;
 
 import eu.stratosphere.pact.common.type.base.PactInteger;
 
-/**
- * @author Andreas Kunft
- */
 public class CNFConverterTest {
 
     @Test
@@ -56,11 +68,11 @@ public class CNFConverterTest {
         assertEquals(expected, cnf.id());
         assertEquals(expected, cnfNegated.id());
 
-        assertEquals(LocalOperator.GREATER_EQUAL_THEN, ((Predicate) ((Composition) cnf).getAtoms().get(0)).operator);
-        assertEquals(LocalOperator.LESS_EQUAL_THEN, ((Predicate) ((Composition) cnf).getAtoms().get(1)).operator);
+        assertEquals(LocalOperator.GREATER_EQUAL_THAN, ((Predicate) ((Composition) cnf).getAtoms().get(0)).operator);
+        assertEquals(LocalOperator.LESS_EQUAL_THAN, ((Predicate) ((Composition) cnf).getAtoms().get(1)).operator);
 
-        assertEquals(LocalOperator.LESS_THEN, ((Predicate) ((Composition) cnfNegated).getAtoms().get(0)).operator);
-        assertEquals(LocalOperator.GREATER_THEN, ((Predicate) ((Composition) cnfNegated).getAtoms().get(1)).operator);
+        assertEquals(LocalOperator.LESS_THAN, ((Predicate) ((Composition) cnfNegated).getAtoms().get(0)).operator);
+        assertEquals(LocalOperator.GREATER_THAN, ((Predicate) ((Composition) cnfNegated).getAtoms().get(1)).operator);
     }
 
     @Test
@@ -70,7 +82,7 @@ public class CNFConverterTest {
                 .predicate(LocalOperator.EQUAL, 0, new PactInteger(0))
                 .predicate(LocalOperator.EQUAL, 1, new PactInteger(1))
                 .startComposition(LogicalOperator.AND)
-                .predicate(LocalOperator.GREATER_THEN, 2, new PactInteger(1))
+                .predicate(LocalOperator.GREATER_THAN, 2, new PactInteger(1))
                 .predicate(LocalOperator.EQUAL, 2, new PactInteger(2))
                 .endComposition()
                 .endComposition()
@@ -114,7 +126,7 @@ public class CNFConverterTest {
         // ~(F | G) ->  (~F & ~G)
         ISelection simpleOR = SelectionBuilder.create()
                 .startNegatedComposition(LogicalOperator.OR)
-                .predicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0))
+                .predicate(LocalOperator.LESS_EQUAL_THAN, 0, new PactInteger(0))
                 .predicate(LocalOperator.NOT_EQUAL, 1, new PactInteger(1))
                 .endComposition()
                 .build();
@@ -124,16 +136,13 @@ public class CNFConverterTest {
         assertTrue("expected: " + simpleORExpected + ", is: " + result.id(), checkEquality(simpleORExpected, result.id()));
         assertTrue(result instanceof Composition);
 
-        System.out.println(simpleOR.id());
-        System.out.println(result.id());
-
-        assertEquals(LocalOperator.GREATER_THEN, ((Predicate) ((Composition) result).getAtoms().get(0)).operator);
+        assertEquals(LocalOperator.GREATER_THAN, ((Predicate) ((Composition) result).getAtoms().get(0)).operator);
         assertEquals(LocalOperator.EQUAL, ((Predicate) ((Composition) result).getAtoms().get(1)).operator);
 
         // ~(F & G) ->(~F | ~G)
         ISelection simpleAND = SelectionBuilder.create()
                 .startNegatedComposition(LogicalOperator.AND)
-                .predicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0))
+                .predicate(LocalOperator.LESS_EQUAL_THAN, 0, new PactInteger(0))
                 .predicate(LocalOperator.NOT_EQUAL, 1, new PactInteger(1))
                 .endComposition()
                 .build();
@@ -144,17 +153,17 @@ public class CNFConverterTest {
 
         assertTrue(result instanceof Composition);
 
-        assertEquals(LocalOperator.GREATER_THEN, ((Predicate) ((Composition) result).getAtoms().get(0)).operator);
+        assertEquals(LocalOperator.GREATER_THAN, ((Predicate) ((Composition) result).getAtoms().get(0)).operator);
         assertEquals(LocalOperator.EQUAL, ((Predicate) ((Composition) result).getAtoms().get(1)).operator);
 
         // ~(~(F | ~G) | H)) -> ((F | ~G) & ~H)
         ISelection complex = SelectionBuilder.create()
                 .startNegatedComposition(LogicalOperator.OR)
                 .startNegatedComposition(LogicalOperator.OR)
-                .predicate(LocalOperator.GREATER_THEN, 0, new PactInteger(0))
-                .negatedPredicate(LocalOperator.GREATER_EQUAL_THEN, 1, new PactInteger(1))
+                .predicate(LocalOperator.GREATER_THAN, 0, new PactInteger(0))
+                .negatedPredicate(LocalOperator.GREATER_EQUAL_THAN, 1, new PactInteger(1))
                 .endComposition()
-                .predicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0))
+                .predicate(LocalOperator.LESS_EQUAL_THAN, 0, new PactInteger(0))
                 .endComposition()
                 .build();
         String complexExpected = "((F||G)&&H)";
@@ -164,9 +173,9 @@ public class CNFConverterTest {
 
         assertTrue(result instanceof Composition);
 
-        assertEquals(LocalOperator.GREATER_THEN, ((Predicate) ((Composition) ((Composition) result).getAtoms().get(0)).getAtoms().get(0)).operator);
-        assertEquals(LocalOperator.LESS_THEN, ((Predicate) ((Composition) ((Composition) result).getAtoms().get(0)).getAtoms().get(1)).operator);
-        assertEquals(LocalOperator.GREATER_THEN, ((Predicate) ((Composition) result).getAtoms().get(1)).operator);
+        assertEquals(LocalOperator.GREATER_THAN, ((Predicate) ((Composition) ((Composition) result).getAtoms().get(0)).getAtoms().get(0)).operator);
+        assertEquals(LocalOperator.LESS_THAN, ((Predicate) ((Composition) ((Composition) result).getAtoms().get(0)).getAtoms().get(1)).operator);
+        assertEquals(LocalOperator.GREATER_THAN, ((Predicate) ((Composition) result).getAtoms().get(1)).operator);
     }
 
     // HELPER

@@ -1,6 +1,25 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax.io.compression;
 
 import java.util.Arrays;
+
+import net.jpountz.lz4.LZ4Compressor;
+import net.jpountz.lz4.LZ4Decompressor;
+import net.jpountz.lz4.LZ4Factory;
 
 /**
  * Compression using the LZ4 compression algorithm.
@@ -8,7 +27,6 @@ import java.util.Arrays;
  * <a>https://code.google.com/p/lz4/</a>
  * <a>https://github.com/jpountz/lz4-java</a>
  *
- * @author Andreas Kunft
  */
 public class LZ4Wrapper {
 

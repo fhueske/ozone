@@ -1,188 +1,174 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax;
 
-import java.io.File;
-import java.util.Iterator;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.MockitoAnnotations.initMocks;
 
+import java.io.File;
+import java.io.IOException;
+
+import junit.framework.Assert;
+
+import org.junit.After;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.Mock;
 
 import eu.stratosphere.nephele.configuration.Configuration;
-import eu.stratosphere.nephele.configuration.GlobalConfiguration;
-import eu.stratosphere.nephele.ipc.Client;
-import eu.stratosphere.pact.common.contract.FileDataSource;
-import eu.stratosphere.pact.common.contract.MapContract;
-import eu.stratosphere.pact.common.contract.ReduceContract;
-import eu.stratosphere.pact.common.io.pax.selection.ISelection;
-import eu.stratosphere.pact.common.io.pax.selection.LocalOperator;
-import eu.stratosphere.pact.common.io.pax.selection.LogicalOperator;
-import eu.stratosphere.pact.common.io.pax.selection.SelectionBuilder;
-import eu.stratosphere.pact.common.stubs.Collector;
-import eu.stratosphere.pact.common.stubs.MapStub;
-import eu.stratosphere.pact.common.stubs.ReduceStub;
+import eu.stratosphere.nephele.fs.FileInputSplit;
+import eu.stratosphere.nephele.fs.Path;
 import eu.stratosphere.pact.common.type.PactRecord;
 import eu.stratosphere.pact.common.type.base.PactLong;
 import eu.stratosphere.pact.common.type.base.PactString;
 
-/**
- * @author Andreas Kunft
- */
 public class SelectionTest {
 
-    private static final String TXT_FILE = "file:///home/hduser/source/RCFile/src/test/resources/sample.txt";
-
-    private static final String RC_FILE = "file:///home/hduser/source/RCFile/src/test/resources/sample.rc";
-
-    private static final String CONFIG_DIR = "/home/hduser/stratosphere-0.2/conf";
-
-    private static final String PATH_TO_JAR = "/home/hduser/source/stratosphere/out/artifacts/pax_format_jar/pax-format.jar";
-
-    private FileDataSource source;
-
-    private MapContract mapper;
-    private ReduceContract reducer;
-
-
-    @BeforeClass
-    public static void createRCFile() throws ProgramInvocationException, ErrorInPlanAssemblerException {
-        File jar = new File(PATH_TO_JAR);
-        // load configuration
-        GlobalConfiguration.loadConfiguration(CONFIG_DIR);
-        Configuration config = GlobalConfiguration.getConfiguration();
-        String[] args = new String[]{TXT_FILE, RC_FILE, "0"};
-        PactProgram prog = new PactProgram(jar, "de.tuberlin.pax.jobs.CreateTestSample", args);
-        Client client = new Client(config);
-        client.run(prog, true);
-    }
-
-
-    @Before
-    public void beforeClass() {
-        source = new FileDataSource(IndexedPAXInputFormat.class, RC_FILE, "Sample in");
-        IndexedPAXInputFormat.configureRCFormat(source)
-                .field(PactLong.class, 0)
-                .field(PactString.class, 1)
-                .field(PactString.class, 2);
-
-        mapper = MapContract
-                .builder(IdentityMap.class)
-                .name("Map")
-                .input(source)
-                .build();
-
-        reducer = ReduceContract
-                .builder(IdentityReducer.class)
-                .name("Reduce")
-                .input(mapper)
-                .keyField(PactLong.class, 0)
-                .build();
-    }
-
-
-    public static class IdentityMap extends MapStub {
-
-        @Override
-        public void map(final PactRecord record, final Collector<PactRecord> out) {
-            out.collect(record);
-        }
-    }
-
-    public static class IdentityReducer extends ReduceStub {
-
-        @Override
-        public void reduce(Iterator<PactRecord> records, Collector<PactRecord> out) throws Exception {
-            while (records.hasNext()) {
-                out.collect(records.next());
-            }
-        }
-    }
+    // test data
+    private Long[] 		testCol0 = {15l,0l,1l,3l,4l,5l,6l,7l,8l,9l,10l,11l,6l,12l,13l,14l,20l,22l,24l,6l,26l,6l};
+    private String[] 	testCol1 = {"copy","copy0","copy2","row4","row5","copssy","copy1","row5",
+    							 "copyax","row6","row1","row2","copy2","copy","caaaaopy","row5",
+    							 "rosssssw3","rosssssw3","rosssssw3","copy1","rosssssw3","copy1"};
+    private String[] 	testCol2 = {"7asfadf23524tsgasdg","2asdf","7asfadf23524tsgasdg","2asdf","2asdf",
+    							 "3agarqwet25","4asfadf23524tsgasdsdfasdfasdfasfdasdfg","5asdfasdfawet253taw",
+    							 "7asfadf23524tsgasdg","6asdf","1asfasf","2asdf","4asfadf23524tsgasdg",
+    							 "3agarqwet25","4asfadf23524tsgasdg","5asdfasdfawet253taw","6asdf",
+    							 "6asdf","6asdf","4asfadf23524tsgasdg","6asdf","4as"};
+    
+    @Mock
+	protected Configuration config;
+	
+	protected File tempFile;
+	
+	private final IndexedPAXInputFormat format = new IndexedPAXInputFormat();
+	
+	// --------------------------------------------------------------------------------------------
+	
+	@Before
+	public void setup() {
+		initMocks(this);
+	}
+	
+	@After
+	public void setdown() throws Exception {
+		if (this.format != null) {
+			this.format.close();
+		}
+		if (this.tempFile != null) {
+			this.tempFile.delete();
+		}
+	}
+    
+    @Test
+	public void testSinglePred() throws IOException {
+		try {
+			
+			tempFile = PaxTestUtil.generateTestData(
+					new String[]{"LONG","STRING","STRING"}, 
+					null, null,
+					testCol0, testCol1, testCol2);
+			final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+			
+			final Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 3);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactLong.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactString.class);
+			PaxTestUtil.addColToInputConfig(parameters, 2, 2, PactString.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactLong.class, "1");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactLong.class).getValue());
+			assertEquals("copy2", record.getField(1, PactString.class).getValue());
+			assertEquals("7asfadf23524tsgasdg", record.getField(2, PactString.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+		}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
 
     @Test
-    public void testSelectionSinglePredicate() {
+	public void testMultiPred() throws IOException {
+		try {
+			
+			tempFile = PaxTestUtil.generateTestData(
+					new String[]{"LONG","STRING","STRING"},
+					null, null,
+					testCol0, testCol1, testCol2);
+			final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+			
+			final Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 3);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactLong.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactString.class);
+			PaxTestUtil.addColToInputConfig(parameters, 2, 2, PactString.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 4);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 1);
+			// AND
+			parameters.setString(IndexedPAXInputFormat.SELECTION_GROUP_LOGICAL_OPERATOR_PREFIX + 0, "AND");
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactLong.class, "6");
+			PaxTestUtil.addPredToInputConfig(parameters, 1, 0, "EQUAL", 1, PactString.class, "copy1");
+				// OR 
+				parameters.setString(IndexedPAXInputFormat.SELECTION_GROUP_LOGICAL_OPERATOR_PREFIX + 1, "OR");
+				PaxTestUtil.addPredToInputConfig(parameters, 2, 1, "EQUAL", 2, PactString.class, "4asfadf23524tsgasdsdfasdfasdfasfdasdfg");
+				PaxTestUtil.addPredToInputConfig(parameters, 3, 1, "EQUAL", 2, PactString.class, "4asfadf23524tsgasdg");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactLong(1));
-
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactLong.class, PactString.class, PactString.class)
-                // 1|copy2|7asfadf23524tsgasdg
-                .add(new PactLong(1), new PactString("copy2"), new PactString("7asfadf23524tsgasdg"));
-        testPlan.run();
-    }
-
-    @Test
-    public void testSelectionSimple() {
-        SelectionBuilder selection = SelectionBuilder.create()
-                .startComposition(LogicalOperator.AND)
-                .predicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactLong(6))
-                .predicate(LocalOperator.EQUAL, 1, new PactString("copy1"))
-                .startComposition(LogicalOperator.OR)
-                .predicate(LocalOperator.EQUAL, 2, new PactString("4asfadf23524tsgasdsdfasdfasdfasfdasdfg"))
-                .predicate(LocalOperator.EQUAL, 2, new PactString("4asfadf23524tsgasdg"))
-                .endComposition()
-                .endComposition();
-
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection.build());
-
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactLong.class, PactString.class, PactString.class)
-                // 6|copy1|4asfadf23524tsgasdg
-                // 6|copy1|4asfadf23524tsgasdsdfasdfasdfasfdasdfg
-                .add(new PactLong(6), new PactString("copy1"), new PactString("4asfadf23524tsgasdg"))
-                .add(new PactLong(6), new PactString("copy1"), new PactString("4asfadf23524tsgasdsdfasdfasdfasfdasdfg"));
-        testPlan.run();
-    }
-
-    @Test
-    public void testSelectionCreationComplex() {
-
-        ISelection selection = SelectionBuilder.create()
-                .startComposition(LogicalOperator.OR)
-                .predicate(LocalOperator.EQUAL, 0, new PactLong(1))
-                .predicate(LocalOperator.BETWEEN, 0, new PactLong(5), new PactLong(8))
-                .startComposition(LogicalOperator.AND)
-                .predicate(LocalOperator.EQUAL, 2, new PactString("2asdf"))
-                .startComposition(LogicalOperator.OR)
-                .predicate(LocalOperator.EQUAL, 0, new PactLong(3))
-                .predicate(LocalOperator.BETWEEN, 0, new PactLong(0), new PactLong(2))
-                .endComposition()
-                .endComposition()
-                .startComposition(LogicalOperator.AND)
-                .predicate(LocalOperator.EQUAL, 0, new PactLong(26))
-                .predicate(LocalOperator.EQUAL, 1, new PactString("rosssssw3"))
-                .endComposition()
-                .endComposition()
-                .build();
-
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        TestPlan testPlan = new TestPlan(reducer);
-        testPlan.getExpectedOutput(PactLong.class, PactString.class, PactString.class)
-                //        0|copy0|2asdf
-                //        1|copy2|7asfadf23524tsgasdg
-                //        3|row4|2asdf
-                //        5|copssy|3agarqwet25
-                //        6|copy1|4asfadf23524tsgasdsdfasdfasdfasfdasdfg
-                //        7|row5|5asdfasdfawet253taw
-                //        8|copyax|7asfadf23524tsgasdg
-                //        6|copy2|4asfadf23524tsgasdg
-                //        6|copy1|4asfadf23524tsgasdg
-                //        26|rosssssw3|6asdf
-                //        6|copy1|4as
-                .add(new PactLong(0), new PactString("copy0"), new PactString("2asdf"))
-                .add(new PactLong(1), new PactString("copy2"), new PactString("7asfadf23524tsgasdg"))
-                .add(new PactLong(3), new PactString("row4"), new PactString("2asdf"))
-                .add(new PactLong(5), new PactString("copssy"), new PactString("3agarqwet25"))
-                .add(new PactLong(6), new PactString("copy1"), new PactString("4asfadf23524tsgasdsdfasdfasdfasfdasdfg"))
-                .add(new PactLong(6), new PactString("copy2"), new PactString("4asfadf23524tsgasdg"))
-                .add(new PactLong(6), new PactString("copy1"), new PactString("4asfadf23524tsgasdg"))
-                .add(new PactLong(6), new PactString("copy1"), new PactString("4as"))
-                .add(new PactLong(7), new PactString("row5"), new PactString("5asdfasdfawet253taw"))
-                .add(new PactLong(8), new PactString("copyax"), new PactString("7asfadf23524tsgasdg"))
-                .add(new PactLong(26), new PactString("rosssssw3"), new PactString("6asdf"));
-
-        testPlan.run();
-    }
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactLong.class).getValue());
+			assertEquals("copy1", record.getField(1, PactString.class).getValue());
+			assertEquals("4asfadf23524tsgasdsdfasdfasdfasfdasdfg", record.getField(2, PactString.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactLong.class).getValue());
+			assertEquals("copy1", record.getField(1, PactString.class).getValue());
+			assertEquals("4asfadf23524tsgasdg", record.getField(2, PactString.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+		}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
 
 }

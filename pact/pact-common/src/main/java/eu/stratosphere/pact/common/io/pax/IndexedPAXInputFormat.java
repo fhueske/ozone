@@ -1,3 +1,18 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax;
 
 import java.io.DataInputStream;
@@ -60,9 +75,8 @@ import eu.stratosphere.pact.common.type.Value;
  * <p/>
  * For the concrete structure, see the paxformat.eps figure in the resources folder.
  *
- * @author Andreas Kunft
  */
-public class IndexedPAXInputFormat extends FileInputFormat implements OutputSchemaProvider {
+public class IndexedPAXInputFormat extends FileInputFormat {
 
     /**
      * CONFIGURATION CONSTANTS
@@ -405,7 +419,7 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
                 for (Column col : columns) {
                     if (col != null) {
                         Value val = col.nextValue();
-                        pactRecord.setField(col.columnPositionInRecord, val);
+                        pactRecord.setField(col.columnPositionInOutput, val);
                     }
                 }
                 currentRow++;
@@ -468,10 +482,10 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
                     currentRow = visitor.incrementAndGetRow();
                     if (match == Status.MATCH) {
                         for (Column col : columns) {
-                            if (col != null && !visitor.columnAlreadySet(col.columnPositionInRecord)) {
+                            if (col != null && !visitor.columnAlreadySet(col.columnPositionInOutput)) {
                                 col.sync(visitor.getCurrentRow() - 1);
                                 Value val = col.nextValue();
-                                pactRecord.setField(col.columnPositionInRecord, val);
+                                pactRecord.setField(col.columnPositionInOutput, val);
                             }
                         }
                         return true;
@@ -500,25 +514,8 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
     }
 
     @Override
-    public BaseStatistics getStatistics(BaseStatistics baseStatistics) {
-        return baseStatistics;
-    }
-
-    @Override
-    public int[] getOutputSchema() {
-        if (this.columns == null)
-            throw new RuntimeException("RCInputFormat must be configured before output schema is available");
-
-        final int[] outputSchema = new int[this.numberOfColumns];
-        int j = 0;
-
-        for (Column column : columns) {
-            if (column != null) {
-                outputSchema[j++] = column.columnPositionInRecord;
-            }
-        }
-        Arrays.sort(outputSchema);
-        return outputSchema;
+    public FileBaseStatistics getStatistics(BaseStatistics baseStatistics) {
+        return (eu.stratosphere.pact.generic.io.FileInputFormat.FileBaseStatistics) baseStatistics;
     }
 
     /**
@@ -528,6 +525,70 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
      * @return The computed file splits.
      * @see eu.stratosphere.pact.common.generic.io.InputFormat#createInputSplits(int)
      */
+    @Override
+    public FileInputSplit[] createInputSplits(int minNumSplits) throws IOException {
+
+        final Path path = this.filePath;
+        final List<FileInputSplit> inputSplits = new ArrayList<FileInputSplit>(minNumSplits);
+
+        final List<FileStatus> files = new ArrayList<FileStatus>();
+
+		final FileSystem fs = path.getFileSystem();
+		final FileStatus pathFile = fs.getFileStatus(path);
+
+		if (pathFile.isDir()) {
+			// input is directory. list all contained files
+			final FileStatus[] dir = fs.listStatus(path);
+			for (int i = 0; i < dir.length; i++) {
+				if (!dir[i].isDir()) {
+					files.add(dir[i]);
+				}
+			}
+		} else {
+			files.add(pathFile);
+		}
+		
+		for(FileStatus file : files) {
+
+			long blockSize = fs.getDefaultBlockSize();
+			long fileLength = file.getLen();
+			
+			if (fileLength > 0) {
+
+	            // get the block locations and make sure they are in order with respect to their offset
+	            final BlockLocation[] blocks = fs.getFileBlockLocations(file, 0, fileLength);
+	            Arrays.sort(blocks);
+
+	            int splitNum = 0;
+	            int lastBlockIndex = 0;
+	            
+	            for (long offset = 0; offset < fileLength; offset += blockSize) {
+	                // last split
+	                long splitSize = (fileLength - offset < blockSize) ? fileLength - offset : blockSize;
+	                HashSet<String> hosts = new HashSet<String>();
+	                lastBlockIndex = getHostsForRCFile(blocks, offset, splitSize, lastBlockIndex, hosts);
+
+	                FileInputSplit fis = new FileInputSplit(splitNum++, file.getPath(), offset, splitSize, hosts.toArray(new String[hosts.size()]));
+	                inputSplits.add(fis);
+	            }
+	        } else {
+	            // this should never happen!!!
+	            throw new RuntimeException("Empty file specified.");
+	        }
+		}
+		
+        return inputSplits.toArray(new FileInputSplit[inputSplits.size()]);
+    }
+    
+
+    /**
+     * In case of pax format we only allow splits of block size!
+     *
+     * @param minNumSplits The minimum desired number of file splits.
+     * @return The computed file splits.
+     * @see eu.stratosphere.pact.common.generic.io.InputFormat#createInputSplits(int)
+     */
+    /*
     @Override
     public FileInputSplit[] createInputSplits(int minNumSplits) throws IOException {
 
@@ -573,6 +634,7 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
 
         return inputSplits.toArray(new FileInputSplit[inputSplits.size()]);
     }
+    */
 
     private int getHostsForRCFile(BlockLocation[] blocks, long offset, long splitSize, int startIndex, HashSet<String> hosts) throws IOException {
 
@@ -636,6 +698,7 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
 
             Column col = new Column();
             col.columnPositionInRecord = columnPosIdx[i];
+            col.columnPositionInOutput = i;
 
             @SuppressWarnings("unchecked")
             Class<? extends Value> clazz = (Class<? extends Value>) config.getClass(COLUMN_TYPE_PARAMETER_PREFIX + i, null);
@@ -918,6 +981,8 @@ public class IndexedPAXInputFormat extends FileInputFormat implements OutputSche
         private IDecompressor decompressor;
 
         public int columnPositionInRecord;
+        
+        public int columnPositionInOutput;
 
         public Value value;
 

@@ -1,1254 +1,3109 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax;
 
-import java.io.File;
-import java.util.Iterator;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.MockitoAnnotations.initMocks;
 
-import org.junit.BeforeClass;
+import java.io.File;
+
+import junit.framework.Assert;
+
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mock;
 
 import eu.stratosphere.nephele.configuration.Configuration;
-import eu.stratosphere.nephele.configuration.GlobalConfiguration;
-import eu.stratosphere.nephele.ipc.Client;
-import eu.stratosphere.pact.common.contract.FileDataSource;
-import eu.stratosphere.pact.common.contract.MapContract;
-import eu.stratosphere.pact.common.io.pax.selection.ISelection;
-import eu.stratosphere.pact.common.io.pax.selection.LocalOperator;
-import eu.stratosphere.pact.common.io.pax.selection.SelectionBuilder;
-import eu.stratosphere.pact.common.stubs.Collector;
-import eu.stratosphere.pact.common.stubs.MapStub;
-import eu.stratosphere.pact.common.stubs.ReduceStub;
+import eu.stratosphere.nephele.fs.FileInputSplit;
+import eu.stratosphere.nephele.fs.Path;
 import eu.stratosphere.pact.common.type.PactRecord;
 import eu.stratosphere.pact.common.type.base.PactInteger;
 
-/**
- * @author Andreas Kunft
- */
 public class BSearchTest {
 
-    private static final String TXT_DUB = "file:///home/hduser/source/RCFile/src/test/resources/sort_Dub.txt";
-
-    private static final String TXT_NO_DUB = "file:///home/hduser/source/RCFile/src/test/resources/sort_noDub.txt";
-
-    private static final String TXT_UNIQUE = "file:///home/hduser/source/RCFile/src/test/resources/sort_unique.txt";
-
-    private static final String RC_DUB = "file:///home/hduser/source/RCFile/src/test/resources/sort_Dub.rc";
-
-    private static final String RC_NO_DUB = "file:///home/hduser/source/RCFile/src/test/resources/sort_noDub.rc";
-
-    private static final String RC_UNIQUE = "file:///home/hduser/source/RCFile/src/test/resources/sort_unique.rc";
-
-    private static final String CONFIG_DIR = "/home/hduser/stratosphere-0.2/conf";
-
-    private static final String PATH_TO_JAR = "/home/hduser/source/stratosphere/out/artifacts/pax_format_jar/pax-format.jar";
-
-    private FileDataSource source;
-
-    private MapContract mapper;
-
-
-    @BeforeClass
-    public static void createRCFile() throws ProgramInvocationException, ErrorInPlanAssemblerException {
-        File jar = new File(PATH_TO_JAR);
-        // load configuration
-        GlobalConfiguration.loadConfiguration(CONFIG_DIR);
-        Configuration config = GlobalConfiguration.getConfiguration();
-        Client client = new Client(config);
-
-        String[] args = new String[]{TXT_DUB, RC_DUB};
-        PactProgram prog = new PactProgram(jar, "de.tuberlin.pax.jobs.CreateBSearchSample", args);
-        client.run(prog, true);
-
-        args = new String[]{TXT_NO_DUB, RC_NO_DUB};
-        prog = new PactProgram(jar, "de.tuberlin.pax.jobs.CreateBSearchSample", args);
-        client.run(prog, true);
-
-        args = new String[]{TXT_UNIQUE, RC_UNIQUE};
-        prog = new PactProgram(jar, "de.tuberlin.pax.jobs.CreateBSearchSample", args);
-        client.run(prog, true);
-    }
-
-
-    public void before(String rcFile) {
-        source = new FileDataSource(IndexedPAXInputFormat.class, rcFile, "Sample in");
-        IndexedPAXInputFormat.configureRCFormat(source)
-                .field(PactInteger.class, 0)
-                .field(PactInteger.class, 1);
-
-        mapper = MapContract
-                .builder(IdentityMap.class)
-                .name("Map")
-                .input(source)
-                .build();
-    }
-
-
-    public static class IdentityMap extends MapStub {
-
-        @Override
-        public void map(final PactRecord record, final Collector<PactRecord> out) {
-            out.collect(record);
-        }
-    }
-
-    public static class IdentityReducer extends ReduceStub {
-
-        @Override
-        public void reduce(Iterator<PactRecord> records, Collector<PactRecord> out) throws Exception {
-            while (records.hasNext()) {
-                out.collect(records.next());
-            }
-        }
-    }
+	private final Integer[] dubSetCol0 = {0, 0, 5, 1, 1, 1, 4, 4, 4, 4, 2, 9, 9, 8, 8, 6, 7};
+	private final Integer[] dubSetCol1 = {1,11, 2, 3,31,32, 4,41,42,43, 5, 7,91, 8,81, 9,10};
+	
+	private final Integer[] uniqSetCol0 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	private final Integer[] uniqSetCol1 = {1, 2, 3, 4, 5, 6, 7, 8, 9,10};
+	
+	private final Integer[] noDubSetCol0 = {0, 5, 1, 4, 2, 9, 8, 6, 7};
+	private final Integer[] noDubSetCol1 = {1, 2, 3, 4, 5, 7, 8, 9,10};
+	
+    @Mock
+	protected Configuration config;
+	
+	protected File tempFile;
+	
+	private final IndexedPAXInputFormat format = new IndexedPAXInputFormat();
+	
+	// --------------------------------------------------------------------------------------------
+	
+	@Before
+	public void setup() {
+		initMocks(this);
+	}
+	
+	@After
+	public void setdown() throws Exception {
+		if (this.format != null) {
+			this.format.close();
+		}
+		if (this.tempFile != null) {
+			this.tempFile.delete();
+		}
+	}
 
     @Test
-    public void testEqual() {
+    public void testEqualUnique() {
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(0));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			uniqSetCol0, uniqSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+					
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
 
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
 
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(-10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(4));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(3));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(-10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(0));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(9));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(4));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(3));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(-10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(0));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.EQUAL, 0, new PactInteger(9));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
+			// ------
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
     }
-
+    
+    
     @Test
-    public void testGetOrGreater() {
+    public void testEqualDublicates() {
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			dubSetCol0, dubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 4 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
 
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
 
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+			// -----
 
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 2 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(4));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(3));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(9));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(4));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(3));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_EQUAL_THEN, 0, new PactInteger(9));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 2 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
     }
-
+    
     @Test
-    public void testGreater() {
+    public void testEqualNoDublicates() {
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(0));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			noDubSetCol0, noDubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// one record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
 
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
 
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+			// -----
 
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 1 record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(-10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(4));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(3));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(-10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(0));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(9));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(8));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(4));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(3));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(-10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(0));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(9));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.GREATER_THEN, 0, new PactInteger(8));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "EQUAL", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// one record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
     }
-
-
+    
     @Test
-    public void testGetOrLower() {
+    public void testGetOrGreaterUnique() {
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			uniqSetCol0, uniqSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+					
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
 
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 10 records output
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
 
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(4));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(3));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(9));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(4));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(3));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(-10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(0));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_EQUAL_THEN, 0, new PactInteger(9));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
+    	} catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
     }
-
+    
     @Test
-    public void testLower() {
+    public void testGetOrGreaterDublicates() {
 
-        ISelection selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(0));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			dubSetCol0, dubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 11 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        TestPlan testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 11 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
 
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
+			// -----
 
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(2))
-                .add(new PactInteger(0), new PactInteger(3))
-                .add(new PactInteger(0), new PactInteger(4))
-                .add(new PactInteger(0), new PactInteger(5))
-                .add(new PactInteger(0), new PactInteger(6))
-                .add(new PactInteger(0), new PactInteger(7))
-                .add(new PactInteger(0), new PactInteger(8))
-                .add(new PactInteger(0), new PactInteger(9))
-                .add(new PactInteger(0), new PactInteger(10));
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
 
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(-10));
-        before(RC_UNIQUE);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(4));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(3));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81))
-                .add(new PactInteger(9), new PactInteger(7))
-                .add(new PactInteger(9), new PactInteger(91));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(-10));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(0));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(9));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(1), new PactInteger(31))
-                .add(new PactInteger(1), new PactInteger(32))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(4), new PactInteger(41))
-                .add(new PactInteger(4), new PactInteger(42))
-                .add(new PactInteger(4), new PactInteger(43))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(8), new PactInteger(81));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(1));
-        before(RC_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(0), new PactInteger(11));
-
-        testPlan.run();
-
-        //---------------------------------------------------------------------------------------------
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(4));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(3));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8))
-                .add(new PactInteger(9), new PactInteger(7));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(-10));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(0));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class);
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(9));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1))
-                .add(new PactInteger(1), new PactInteger(3))
-                .add(new PactInteger(2), new PactInteger(5))
-                .add(new PactInteger(4), new PactInteger(4))
-                .add(new PactInteger(5), new PactInteger(2))
-                .add(new PactInteger(6), new PactInteger(9))
-                .add(new PactInteger(7), new PactInteger(10))
-                .add(new PactInteger(8), new PactInteger(8));
-
-        testPlan.run();
-
-        selection = SelectionBuilder.buildSinglePredicate(LocalOperator.LESS_THEN, 0, new PactInteger(1));
-        before(RC_NO_DUB);
-        IndexedPAXInputFormat.configureRCFormat(source).selection(selection);
-
-        testPlan = new TestPlan(mapper);
-        testPlan.getExpectedOutput(PactInteger.class, PactInteger.class)
-                .add(new PactInteger(0), new PactInteger(1));
-
-        testPlan.run();
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 2 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
     }
+    
+    @Test
+    public void testGetOrGreaterNoDublicates() {
 
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			noDubSetCol0, noDubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// seven records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect 7 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 9 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 10 record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_EQUAL_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// one record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testGreaterUnique() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			uniqSetCol0, uniqSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 10 records output
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+    	} catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testGreaterDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			dubSetCol0, dubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 7 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 11 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 15 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testGreaterNoDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			noDubSetCol0, noDubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 6 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect 7 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 10 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 9 record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "GREATER_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no record expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testGetOrLessUnique() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			uniqSetCol0, uniqSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+					
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			/*
+			while(format.nextRecord(record)) {
+				System.out.println(record.getField(0, PactInteger.class).getValue()+" : "+record.getField(1, PactInteger.class).getValue());
+			}
+			System.out.println("------");
+			*/
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+					
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+
+			// ------
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    
+    @Test
+    public void testGetOrLessDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			dubSetCol0, dubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 6 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+            
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			/*
+			while(format.nextRecord(record)) {
+				System.out.println(record.getField(0, PactInteger.class).getValue()+" : "+record.getField(1, PactInteger.class).getValue());
+			}
+			System.out.println("------");
+			*/
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 2 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testGetOrLessNoDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			noDubSetCol0, noDubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 4 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 3 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			/*
+			while(format.nextRecord(record)) {
+				System.out.println(record.getField(0, PactInteger.class).getValue()+" : "+record.getField(1, PactInteger.class).getValue());
+			}
+			System.out.println("------");
+			*/
+			
+			// 9 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 1 record expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_EQUAL_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 9 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testLessUnique() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			uniqSetCol0, uniqSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 10 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(6, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+		
+			format.close();
+
+			// ------
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    
+    @Test
+    public void testLessDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			dubSetCol0, dubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 6 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 6 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+            
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 17 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(91, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no records expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 15 records expected
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(81, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(41, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(42, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(43, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(31, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(32, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(11, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
+    @Test
+    public void testLessNoDublicates() {
+
+    	try {
+    	
+	    	tempFile = PaxTestUtil.generateTestData(
+	    			new String[]{"INT","INT"},
+	    			new boolean[]{true, false}, null, 
+	    			noDubSetCol0, noDubSetCol1);
+	    	final FileInputSplit split = new FileInputSplit(0, new Path("file://" + this.tempFile.getAbsolutePath()), 0, this.tempFile.length(), new String[] {"localhost"});
+	    	
+	    	Configuration parameters = new Configuration();
+			parameters.setString(IndexedPAXInputFormat.FILE_PARAMETER_KEY, "file:///some/file/that/will/not/be/read");
+			// define output
+			parameters.setInteger(IndexedPAXInputFormat.COLUMN_NUM_PARAMETER, 2);
+			PaxTestUtil.addColToInputConfig(parameters, 0, 0, PactInteger.class);
+			PaxTestUtil.addColToInputConfig(parameters, 1, 1, PactInteger.class);
+			// define selection
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_GROUP_PARAMETER, 0);
+			parameters.setBoolean(IndexedPAXInputFormat.SELECTION_SINGLE_PREDICATE, true);
+			parameters.setInteger(IndexedPAXInputFormat.SELECTION_NUM_PARAMETER, 1);
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "4");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			PactRecord record = new PactRecord();
+			
+			// 3 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "3");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 3 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 9 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(9, record.getField(0, PactInteger.class).getValue());
+			assertEquals(7, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// ------
+			
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "-10");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// expect no output
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "0");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// no record expected
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+			// -----
+
+			// overwrite predicate
+			PaxTestUtil.addPredToInputConfig(parameters, 0, 0, "LESS_THAN", 0, PactInteger.class, "9");
+			
+			format.configure(parameters);
+			format.open(split);
+			
+			// 8 records
+			assertTrue(format.nextRecord(record));
+			assertEquals(8, record.getField(0, PactInteger.class).getValue());
+			assertEquals(8, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(7, record.getField(0, PactInteger.class).getValue());
+			assertEquals(10, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(6, record.getField(0, PactInteger.class).getValue());
+			assertEquals(9, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(5, record.getField(0, PactInteger.class).getValue());
+			assertEquals(2, record.getField(1, PactInteger.class).getValue());
+			
+			assertTrue(format.nextRecord(record));
+			assertEquals(4, record.getField(0, PactInteger.class).getValue());
+			assertEquals(4, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(2, record.getField(0, PactInteger.class).getValue());
+			assertEquals(5, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(1, record.getField(0, PactInteger.class).getValue());
+			assertEquals(3, record.getField(1, PactInteger.class).getValue());
+
+			assertTrue(format.nextRecord(record));
+			assertEquals(0, record.getField(0, PactInteger.class).getValue());
+			assertEquals(1, record.getField(1, PactInteger.class).getValue());
+			
+			assertFalse(format.nextRecord(record));
+			assertTrue(format.reachedEnd());
+			
+			format.close();
+			
+    	}
+		catch (Exception ex) {
+			Assert.fail("Test failed due to a " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+    }
+    
 }

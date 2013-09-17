@@ -21,6 +21,16 @@
 			<artifactId>nephele-common</artifactId>
 			<version>${project.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>net.jpountz.lz4</groupId>
+			<artifactId>lz4</artifactId>
+			<version>1.2.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.jponge</groupId>
+			<artifactId>lzma-java</artifactId>
+			<version>1.2</version>
+		</dependency>
 	</dependencies>
 
 	<reporting>

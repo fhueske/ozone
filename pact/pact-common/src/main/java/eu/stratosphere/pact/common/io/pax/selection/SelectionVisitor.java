@@ -1,3 +1,18 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax.selection;
 
 import java.io.IOException;
@@ -19,7 +34,6 @@ import eu.stratosphere.pact.common.type.PactRecord;
  * predicate for the whole row group and not only for a specific
  * column.
  *
- * @author Andreas Kunft
  */
 public class SelectionVisitor {
 
@@ -117,7 +131,13 @@ public class SelectionVisitor {
                 tree = new BSearch(header.getSortedRows(position), columns[position]);
                 sortingUsed = true;
             }
-            return evaluateSortedColumn(predicate);
+            if(evaluateSortedColumn(predicate) == Status.MATCH) {
+                record.setField(col.columnPositionInOutput, tree.getCurrentValue());
+                setColumns.add(col.columnPositionInOutput);
+                return Status.MATCH;
+            } else {
+            	return Status.NO_MATCH_GLOBAL;
+            }
         }
 
 
@@ -125,8 +145,8 @@ public class SelectionVisitor {
         col.sync(currentRow);
         Key colValue = (Key) col.nextValue();
         if (predicate.evaluate(colValue)) {
-            record.setField(predicate.position, colValue);
-            setColumns.add(predicate.position);
+            record.setField(col.columnPositionInOutput, colValue);
+            setColumns.add(col.columnPositionInOutput);
             return Status.MATCH;
         }
         return Status.NO_MATCH;
@@ -148,16 +168,16 @@ public class SelectionVisitor {
             case EQUAL:
                 row = tree.get(predicate.literal);
                 break;
-            case GREATER_EQUAL_THEN:
+            case GREATER_EQUAL_THAN:
                 row = tree.getOrHigher(predicate.literal);
                 break;
-            case GREATER_THEN:
+            case GREATER_THAN:
                 row = tree.getHigher(predicate.literal);
                 break;
-            case LESS_EQUAL_THEN:
+            case LESS_EQUAL_THAN:
                 row = tree.getOrLower(predicate.literal);
                 break;
-            case LESS_THEN:
+            case LESS_THAN:
                 row = tree.getLower(predicate.literal);
                 break;
             default:
@@ -165,10 +185,6 @@ public class SelectionVisitor {
         }
         if (row != -1) {
             currentRow = row;
-
-            record.setField(predicate.position, tree.getCurrentValue());
-            setColumns.add(predicate.position);
-
             return Status.MATCH;
         } else {
             // global mismatch

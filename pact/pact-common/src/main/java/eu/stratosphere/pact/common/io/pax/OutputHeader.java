@@ -1,3 +1,18 @@
+/***********************************************************************************************************************
+ *
+ * Copyright (C) 2010 by the Stratosphere project (http://stratosphere.eu)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 package eu.stratosphere.pact.common.io.pax;
 
 import java.io.IOException;
@@ -25,7 +40,6 @@ import eu.stratosphere.pact.common.type.Value;
  * <p/>
  * For the concrete structure, see the paxformat.eps figure in the resources folder.
  *
- * @author Andreas Kunft
  */
 public class OutputHeader {
 
@@ -182,25 +196,25 @@ public class OutputHeader {
         // if not update columns, before flush to stream
         for (int i = 0; i < columns; i++) {
             if (sameFieldLengthBuffer[i] < -1) {
-                writeInt(bytesPerField[i], sameFieldLengthBuffer[i]);
+            	Utils.writeInt(bytesPerField[i], sameFieldLengthBuffer[i]);
             }
         }
 
         // write to stream
         stream.write(SYNC_BLOCK);
-        writeInt(stream, paddingSize);
-        writeInt(stream, sortedColumns.size());
-        writeInt(stream, bloomFilterColumns.size());
-        writeInt(stream, records);
-        writeInt(stream, columns);
+        Utils.writeInt(stream, paddingSize);
+        Utils.writeInt(stream, sortedColumns.size());
+        Utils.writeInt(stream, bloomFilterColumns.size());
+        Utils.writeInt(stream, records);
+        Utils.writeInt(stream, columns);
         for (int i = 0; i < columns; i++) {
             final boolean sorted = sortedColumns.containsKey(i);
             final boolean bloom = bloomFilterColumns.containsKey(i);
             final boolean lhKeys = highLowKeys[i].size() > 0;
 
-            writeInt(stream, uncompressedBytesPerColumn[i]);
-            writeInt(stream, compressedBytesPerColumn[i]);
-            writeInt(stream,
+            Utils.writeInt(stream, uncompressedBytesPerColumn[i]);
+            Utils.writeInt(stream, compressedBytesPerColumn[i]);
+            Utils.writeInt(stream,
                     1 + // flag
                             (sorted ? sortedColumns.get(i).getSizeOnDisk() : 0) + // sorted
                             (bloom ? bloomFilterColumns.get(i).getSizeOnDisk() : 0) + // bloom
@@ -215,7 +229,7 @@ public class OutputHeader {
             // sorting
             if (sorted) {
                 for (int row : sortedColumns.get(i).getSortedRows()) {
-                    writeInt(stream, row);
+                	Utils.writeInt(stream, row);
                 }
             }
             // bloom filter
@@ -309,9 +323,9 @@ public class OutputHeader {
             sameFieldLengthBuffer[position]--;
         } else {
             if (sameFieldLengthBuffer[position] < -1) {
-                writeInt(bytesPerField[position], sameFieldLengthBuffer[position]);
+            	Utils.writeInt(bytesPerField[position], sameFieldLengthBuffer[position]);
             }
-            writeInt(bytesPerField[position], fieldLength);
+            Utils.writeInt(bytesPerField[position], fieldLength);
             previousFieldLength[position] = fieldLength;
             sameFieldLengthBuffer[position] = -1;
             sizeInBytes += 4;
