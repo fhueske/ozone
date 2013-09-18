@@ -571,9 +571,6 @@ public class IndexedPAXInputFormat extends FileInputFormat {
 	                FileInputSplit fis = new FileInputSplit(splitNum++, file.getPath(), offset, splitSize, hosts.toArray(new String[hosts.size()]));
 	                inputSplits.add(fis);
 	            }
-	        } else {
-	            // this should never happen!!!
-	            throw new RuntimeException("Empty file specified.");
 	        }
 		}
 		
