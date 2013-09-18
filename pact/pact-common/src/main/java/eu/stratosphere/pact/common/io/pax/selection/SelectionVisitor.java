@@ -105,13 +105,13 @@ public class SelectionVisitor {
         final IndexedPAXInputFormat.Column col = columns[position];
 
         // check low / high
-        /*if (!checkedHLKeysAlready.contains(predicate)) {
+        if (!checkedHLKeysAlready.contains(predicate)) {
             checkedHLKeysAlready.add(predicate);
 
             if (!predicate.evaluateLowHigh(col.low, col.high)) {
                 return Status.NO_MATCH_GLOBAL;
             }
-        }*/
+        }
 
         if (!checkedBloomFilterAlready.contains(predicate)) {
             checkedBloomFilterAlready.add(predicate);
