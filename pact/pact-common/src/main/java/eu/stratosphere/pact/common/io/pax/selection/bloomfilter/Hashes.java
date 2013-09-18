@@ -31,19 +31,5 @@ public enum Hashes implements BloomFilter.Factory {
         public HashFunction<String> get(int seed) {
             return new MurmurHash(seed);
         }
-    },
-
-    BERNSTEIN() {
-        @Override
-        public HashFunction<String> get(int seed) {
-            return new BernsteinHash(seed);
-        }
-    },
-
-    MD5() {
-        @Override
-        public HashFunction<String> get(int seed) {
-            return new MD5Hash(seed);
-        }
     };
 }
