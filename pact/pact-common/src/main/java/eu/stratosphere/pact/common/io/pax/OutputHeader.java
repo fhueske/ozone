@@ -217,8 +217,8 @@ public class OutputHeader {
             Utils.writeInt(stream,
                     1 + // flag
                             (sorted ? sortedColumns.get(i).getSizeOnDisk() : 0) + // sorted
-                            (bloom ? bloomFilterColumns.get(i).getSizeOnDisk() : 0) + // bloom
-                            (lhKeys ? highLowKeys[i].size() : 0) + // LH
+                            (bloom ? (bloomFilterColumns.get(i).getSizeOnDisk() + 4) : 0) + // bloom
+                            (lhKeys ? (highLowKeys[i].size() + 4) : 0) + // LH
                             bytesPerField[i].size()); // values
             // feature flag
             stream.write(
@@ -234,11 +234,12 @@ public class OutputHeader {
             }
             // bloom filter
             if (bloom) {
+            	Utils.writeInt(stream,bloomFilterColumns.get(i).getSizeOnDisk());
                 bloomFilterColumns.get(i).write(stream);
             }
             if (lhKeys) {
                 // high low keys
-                // writeInt(stream, highLowKeys[i].size());
+                Utils.writeInt(stream, highLowKeys[i].size());
                 stream.write(highLowKeys[i].getData());
             }
 
@@ -399,7 +400,7 @@ public class OutputHeader {
             high.write(highLowKeys[position]);
             low.write(highLowKeys[position]);
             synchronized (this) {
-                sizeInBytes += highLowKeys[position].size();
+                sizeInBytes += highLowKeys[position].size() + 4;
             }
         }
     }

@@ -147,7 +147,32 @@ public class IndexedPAXInputFormat extends FileInputFormat {
      */
     private DataInputStream input;
 
+    /**
+     * Bulk read buffer size 4MB
+     */
+    private final static int BUFFERSIZE = 1024*1024*4;
+    
+    /**
+     * Bulk read buffer
+     */
+    private byte[] readBuffer;
+    
+    /**
+     * Buffer read position
+     */
+    private int readPos;
+    
+    /**
+     * Buffer fill position
+     */
+    private int fillLength;
 
+    public IndexedPAXInputFormat() {
+    	super();
+    	
+    	readBuffer = new byte[BUFFERSIZE];
+    }
+    
     /**
      * Opens an input stream to the file defined in the input format.
      * The stream is positioned at the beginning of the given split.
@@ -163,6 +188,10 @@ public class IndexedPAXInputFormat extends FileInputFormat {
         super.open(split);
         input = new DataInputStream(stream);
 
+        // reset read position and fill length
+        readPos = 0;
+        fillLength = 0;
+        
         // read header first
         readHeader();
 
@@ -200,18 +229,18 @@ public class IndexedPAXInputFormat extends FileInputFormat {
             currentRow = -1;
 
             syncCheck();
-            header.paddingSize = input.readInt();
+            header.paddingSize = readIntFromBuffer();
             // check for skip
             // if an row group could not be added to the current
             if (header.paddingSize == IndexedPAXOutputFormat.SKIP) {
                 return false;
             }
             // num sorted columns
-            input.readInt();
+            readIntFromBuffer();
             // num bloom filter columns
-            input.readInt();
-            header.records = input.readInt();
-            header.columnsInRowGroup = input.readInt();
+            readIntFromBuffer();
+            header.records = readIntFromBuffer();
+            header.columnsInRowGroup = readIntFromBuffer();
             header.uncompressedBytesPerColumn = new int[header.columnsInRowGroup];
             header.compressedBytesPerColumn = new int[header.columnsInRowGroup];
             //header.bytesPerField = new int[header.columnsInRowGroup][header.records];
@@ -246,11 +275,11 @@ public class IndexedPAXInputFormat extends FileInputFormat {
 
             // sync of first row group
             header.syncCheck = new byte[16];
-            input.readFully(header.syncCheck);
+            fillByteArrayFromBuffer(header.syncCheck);
         } else {
             // check sync
             byte[] readSync = new byte[16];
-            input.readFully(readSync);
+            fillByteArrayFromBuffer(readSync);
             if (!Arrays.equals(readSync, header.syncCheck)) {
                 throw new RuntimeException("RC Input File corrupt: Sync check for row group failed");
             }
@@ -266,17 +295,17 @@ public class IndexedPAXInputFormat extends FileInputFormat {
     private void readBlockHeader() throws IOException {
         // check for MAGIC
         byte[] magic = new byte[IndexedPAXOutputFormat.MAGIC_NUMBER.length];
-        input.readFully(magic);
+        fillByteArrayFromBuffer(magic);
         if (!Arrays.equals(magic, IndexedPAXOutputFormat.MAGIC_NUMBER)) {
             throw new RuntimeException("RC Input Split has to start with: " + new String(IndexedPAXOutputFormat.MAGIC_NUMBER) + " (Wrong Offset)");
         }
 
         // get number of columns in pax file
-        final int numberOfColumnsInPAX = input.readInt();
+        final int numberOfColumnsInPAX = readIntFromBuffer();
 
         // check for correct column classes
         for (int i = 0; i < numberOfColumnsInPAX; i++) {
-            final byte type = input.readByte();
+            final byte type = readByteFromBuffer();
             if (i < columns.length && columns[i] != null) {
                 Class<? extends Value> clazz = Utils.getValueClassForByte(type);
                 if (columns[i].value.getClass() != clazz) {
@@ -287,7 +316,7 @@ public class IndexedPAXInputFormat extends FileInputFormat {
 
         // get compression types for columns
         for (int i = 0; i < numberOfColumnsInPAX; i++) {
-            final byte decompressorID = input.readByte();
+            final byte decompressorID = readByteFromBuffer();
             if (i < columns.length && columns[i] != null) {
                 IDecompressor decompressor = CompressionCodecs.getDecompressorForID(decompressorID);
                 columns[i].setDecompressor(decompressor);
@@ -302,42 +331,48 @@ public class IndexedPAXInputFormat extends FileInputFormat {
      * @throws IOException
      */
     private void fetchHeaderColumnData(int position) throws IOException {
-        header.uncompressedBytesPerColumn[position] = input.readInt();
-        header.compressedBytesPerColumn[position] = input.readInt();
-
+        header.uncompressedBytesPerColumn[position] = readIntFromBuffer();
+        header.compressedBytesPerColumn[position] = readIntFromBuffer();
+        
         // if column is not used, skip further read
-        int length = input.readInt();
+        int length = readIntFromBuffer();
         if (position >= columns.length || columns[position] == null) {
-            input.skipBytes(length);
+        	
+        	shiftBuffer(length, false);
             return;
         }
-
+        
         // feature flags (0x01 | 0x02 sorted, 0x04 bloom filter, 0x08 lh keys)
-        byte flags = input.readByte();
+        byte flags = readByteFromBuffer();
         // sorting
         if ((flags & (OutputHeader.SORTED_ASC_FLAG | OutputHeader.SORTED_DSC_FLAG)) > 0) {
             SortedRow row = new SortedRow();
-            row.rows = new byte[input.readInt() * 4];
-            input.readFully(row.rows);
+            row.rows = new byte[readIntFromBuffer() * 4];
+            fillByteArrayFromBuffer(row.rows);
             row.order = (flags & OutputHeader.SORTED_ASC_FLAG) > 0;
             header.sortedColumns.put(position, row);
         }
         // bloom filter
         if ((flags & OutputHeader.BLOOM_FILTER_FLAG) > 0) {
-            header.bloomFilterColumns.put(position, new BloomFilter(input));
+        	int bloomFilterLength = readIntFromBuffer();
+        	ByteDataInputStream dataStream = getDataInputStreamFromBuffer(bloomFilterLength);
+            header.bloomFilterColumns.put(position, new BloomFilter(dataStream));
         }
 
         // high low keys
         if ((flags & OutputHeader.LOW_HIGH_VALUES) > 0) {
-            columns[position].high.read(input);
-            columns[position].low.read(input);
+        	int highLowKeyLength = readIntFromBuffer();
+        	ByteDataInputStream dataStream = getDataInputStreamFromBuffer(highLowKeyLength);
+            columns[position].high.read(dataStream);
+            columns[position].low.read(dataStream);
         }
 
-        int lastValueLength = input.readInt();
+        int lastValueLength = readIntFromBuffer();
         //header.bytesPerField[position][0] = lastValueLength;
         header.bytesPerFieldOffset[position][0] = lastValueLength;
+        
         for (int j = 1; j < header.records; ) {
-            int val = input.readInt();
+            int val = readIntFromBuffer();
             if (val < 0) {
                 // RLE
                 for (int times = -1; times > val; times--) {
@@ -443,15 +478,94 @@ public class IndexedPAXInputFormat extends FileInputFormat {
         for (Column col : columns) {
             // skip if the column is not projected
             if (col == null) {
-                input.skipBytes(header.compressedBytesPerColumn[position]);
+                shiftBuffer(header.compressedBytesPerColumn[position], false);
             } else {
                 col.setBuffer(new byte[header.compressedBytesPerColumn[position]]);
-                input.readFully(col.compressedBuffer);
+                fillByteArrayFromBuffer(col.compressedBuffer);
             }
             position++;
         }
     }
-
+    
+    private void shiftBuffer(int skipLength, boolean fillBuffer) throws IOException {
+    	// check target position is already in buffer
+    	if(skipLength <= (fillLength-readPos)) {
+    		// only move read pos
+    		readPos += skipLength;
+    	} else {
+    		// move stream position
+    		input.skipBytes(skipLength-(fillLength-readPos));
+    		if(fillBuffer) {
+    			refillBuffer();
+    		}
+    		// move read pos to end
+    		readPos = fillLength;
+    	}
+    }
+    
+    private void refillBuffer() throws IOException {
+    	// move remaining bytes to front
+    	System.arraycopy(readBuffer, readPos, readBuffer, 0, fillLength - readPos);
+    	fillLength = fillLength - readPos;
+    	readPos = 0;
+    	// get new data from stream
+    	int readLength = input.read(readBuffer, fillLength, readBuffer.length-fillLength);
+    	if(readLength == -1) {
+    		throw new EOFException();
+    	} else {
+    		fillLength += readLength;
+    	}
+    }
+    
+    private byte readByteFromBuffer() throws IOException {
+    	// check if we can do the read
+    	if(readPos+1 > fillLength) {
+    		refillBuffer();
+    	}
+    	return readBuffer[readPos++];
+    }
+    
+    private int readIntFromBuffer() throws IOException {
+    	// check if we can do the read
+    	if(readPos+4 > fillLength) {
+    		refillBuffer();
+    	}
+    	// forward read pos
+    	readPos += 4;
+    	// read the int
+    	return	 readBuffer[readPos-1] & 0xFF |
+                (readBuffer[readPos-2] & 0xFF) << 8 |
+                (readBuffer[readPos-3] & 0xFF) << 16 |
+                (readBuffer[readPos-4]   & 0xFF) << 24;
+    }
+    
+    private void fillByteArrayFromBuffer(byte[] target) throws IOException {
+    	int targetPos = 0;
+    	if(fillLength == 0) {
+    		refillBuffer();
+    	}
+    	while(targetPos < target.length) {
+    		// how much can we copy?    		
+    		int copyLength = (fillLength - readPos) < (target.length - targetPos) ?
+    			(fillLength - readPos) : (target.length - targetPos);
+    		// copy 
+    		System.arraycopy(readBuffer, readPos, target, targetPos, copyLength);
+    		// add just positions
+    		readPos += copyLength;
+    		targetPos += copyLength;
+    		// refill buffer if needed
+    		if(readPos == fillLength && targetPos != target.length) {
+    			refillBuffer();
+    		}
+    	}
+    }
+    
+    private ByteDataInputStream getDataInputStreamFromBuffer(int length) throws IOException {
+    	byte[] inArray = new byte[length];
+    	fillByteArrayFromBuffer(inArray);
+    	return new ByteDataInputStream(inArray);
+    }
+    
     /**
      * Evaluates the column data against the selection predicates.
      *
@@ -548,6 +662,7 @@ public class IndexedPAXInputFormat extends FileInputFormat {
 			files.add(pathFile);
 		}
 		
+		int splitNum = 0;
 		for(FileStatus file : files) {
 
 			long blockSize = fs.getDefaultBlockSize();
@@ -559,7 +674,6 @@ public class IndexedPAXInputFormat extends FileInputFormat {
 	            final BlockLocation[] blocks = fs.getFileBlockLocations(file, 0, fileLength);
 	            Arrays.sort(blocks);
 
-	            int splitNum = 0;
 	            int lastBlockIndex = 0;
 	            
 	            for (long offset = 0; offset < fileLength; offset += blockSize) {
@@ -824,7 +938,7 @@ public class IndexedPAXInputFormat extends FileInputFormat {
     public static ConfigBuilder configureRCFormat(FileDataSource target) {
         return new ConfigBuilder(target.getParameters());
     }
-
+    
     /**
      * An abstract builder used to set parameters to the input format's configuration in a fluent way.
      */
