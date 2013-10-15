@@ -29,36 +29,49 @@ import eu.stratosphere.pact.common.type.Key;
  */
 public class BSearch {
 
-    private final byte[] rows;
+    // STATIC DATA
 
+    // the sortedRows sorted by the key in ascending order
+    private final byte[] sortedRows;
+
+    // the number of unique values and/or offsets
     private final int uniqueRowsLength;
 
-    // COLUMN DATA
-
-    private final IndexedPAXInputFormat.Column keys;
-
-    private Key currentValue;
-
-    private int currentIndex = -1;
-
-    private int currentDuplicateIndex = -1;
-
-    private int currentRow = -1;
-
-    private int numberOfDuplicatesLeft;
-
+    // the index in the sortedRows array where the duplicates start
     private final int duplicatesOffset;
 
+    // the column with the actual values associated with sorted sortedRows
+    private final IndexedPAXInputFormat.Column keys;
+
+    // SEARCH SPECIFIC DATA
+
+    // the current materialized value
+    private Key currentValue;
+
+    // the current row specifying the index of a value in the keys column
+    private int currentRow = -1;
+
+    // the current index in the sortedRows array
+    private int currentIndex = -1;
+
+    // DUPLICATE MANAGEMENT
+
+    // if the value hit has duplicates, this index specifies the duplicates are located in the sortedRows array
+    private int currentDuplicateIndex = -1;
+
+    // if the value hit has duplicates, this number specifies how many duplicates are left
+    private int numberOfDuplicatesLeft;
+
     /**
-     * Creates the structure for the supplied rows and keys.
+     * Creates the structure for the supplied sortedRows and keys.
      *
-     * @param rows the sorted rows for the keys.
-     * @param keys the keys for the sorted rows
+     * @param sortedRows the sorted sortedRows for the keys.
+     * @param keys the keys for the sorted sortedRows
      */
-    public BSearch(byte[] rows, IndexedPAXInputFormat.Column keys) {
-        this.rows = rows;
+    public BSearch(byte[] sortedRows, IndexedPAXInputFormat.Column keys) {
+        this.sortedRows = sortedRows;
         this.keys = keys;
-        this.uniqueRowsLength = (((rows[0] & 0xff) << 24) + ((rows[1] & 0xff) << 16) + ((rows[2] & 0xff) << 8) + (rows[3] & 0xff));
+        this.uniqueRowsLength = (((sortedRows[0] & 0xff) << 24) + ((sortedRows[1] & 0xff) << 16) + ((sortedRows[2] & 0xff) << 8) + (sortedRows[3] & 0xff));
 
         this.duplicatesOffset = uniqueRowsLength + 1;
     }
@@ -83,44 +96,29 @@ public class BSearch {
      * @throws DataFormatException
      */
     public int getHigher(Key key) throws IOException, DataFormatException {
-        // matched before and duplicates
-        if (currentDuplicateIndex > 0) {
-            syncAndGet();
-            if (currentRow > 0) {
-                return currentRow;
-            }
-        }
 
-        // second call
-        if (currentIndex > 0) {
-            // check next elem in array
-            currentIndex++;
-            if (currentIndex < duplicatesOffset) {
-                syncAndGet(currentIndex);
-
-                return currentRow;
-            } else {
-                return -1;
-            }
-        }
+        // matched before
+        if (moreDuplicates()) return currentRow;
+        if (currentIndex > 0) return moreLargerKeys();
 
 
         // first access to index, do bsearch
         currentIndex = search(key);
         if (currentIndex < 0) {
-            // no match, check if in bound
-            if (Math.abs(currentIndex) >= duplicatesOffset) {
+            currentIndex = Math.abs(currentIndex);
+            // all smaller
+            if (currentIndex >= duplicatesOffset) {
                 return -1;
             }
-            currentIndex = Math.abs(currentIndex);
-            // match get next higher
+
         } else {
+            // match get next higher
             currentIndex++;
             if (currentIndex >= duplicatesOffset) {
                 return -1;
             }
         }
-        // get value
+        // match or between
         syncAndGet(currentIndex);
         return currentRow;
     }
@@ -136,27 +134,9 @@ public class BSearch {
      * @throws DataFormatException
      */
     public int getOrHigher(Key key) throws IOException, DataFormatException {
-        // matched before and duplicates
-        if (currentDuplicateIndex > 0) {
-            syncAndGet();
-            if (currentRow > 0) {
-                return currentRow;
-            }
-        }
-
-        // second call
-        if (currentIndex > 0) {
-            // check next elem in array
-            currentIndex++;
-            if (currentIndex < duplicatesOffset) {
-                syncAndGet(currentIndex);
-
-                return currentRow;
-            } else {
-                return -1;
-            }
-        }
-
+        // matched before
+        if (moreDuplicates()) return currentRow;
+        if (currentIndex > 0) return moreLargerKeys();
 
         // first access to index, do bsearch
         currentIndex = search(key);
@@ -179,37 +159,24 @@ public class BSearch {
      */
     public int getOrLower(Key key) throws IOException, DataFormatException {
         // matched before and duplicates
-        if (currentDuplicateIndex > 0) {
-            syncAndGet();
-            if (currentRow > 0) {
-                return currentRow;
-            }
-        }
+        if (moreDuplicates()) return currentRow;
 
-        // second call
-        if (currentIndex > 0) {
-            // check next elem in array
-            currentIndex--;
-            if (currentIndex > 0) {
-                syncAndGet(currentIndex);
-
-                return currentRow;
-            } else {
-                return -1;
-            }
-        }
+        // matched before get next smaller element (or no more duplicates)
+        if (currentIndex > 0) return moreSmallerKeys();
 
 
         // first access to index, do bsearch
         currentIndex = search(key);
+        // no exact match
         if (currentIndex < 0) {
+            // all larger than key
             if (currentIndex == -1) {
                 return -1;
             }
+
+            // between or all smaller
             currentIndex = Math.abs(currentIndex);
-            if (currentValue.compareTo(key) > 0) {
-                syncAndGet(--currentIndex);
-            }
+            syncAndGet(--currentIndex);
         }
 
         return currentRow;
@@ -227,40 +194,26 @@ public class BSearch {
      */
     public int getLower(Key key) throws IOException, DataFormatException {
         // matched before and duplicates
-        if (currentDuplicateIndex > 0) {
-            syncAndGet();
-            if (currentRow > 0) {
-                return currentRow;
-            }
-        }
+        if (moreDuplicates()) return currentRow;
 
-        // second call
+        // matched before get next smaller element (or no more duplicates)
         if (currentIndex > 0) {
-            // check next elem in array
-            currentIndex--;
-            if (currentIndex > 0) {
-                syncAndGet(currentIndex);
-
-                return currentRow;
-            } else {
-                return -1;
-            }
+            return moreSmallerKeys();
         }
 
 
         // first access to index, do bsearch
         currentIndex = search(key);
         if (currentIndex < 0) {
-            // no match, check if in bound
+            // all larger
             if (currentIndex == -1) {
                 return -1;
             }
+            // between or all smaller
             currentIndex = Math.abs(currentIndex);
-            if (currentValue.compareTo(key) >= 0) {
-                syncAndGet(--currentIndex);
-            }
-            // match get next higher
+            syncAndGet(--currentIndex);
         } else {
+            // matched, get next smaller
             currentIndex--;
             if (currentIndex < 1) {
                 return -1;
@@ -282,31 +235,55 @@ public class BSearch {
      * @throws DataFormatException
      */
     public int get(Key key) throws IOException, DataFormatException {
-        // matched before and duplicates
-        if (currentDuplicateIndex > 0) {
-            syncAndGet();
-            if (currentRow > 0) {
-                return currentRow;
-            }
-
-            currentIndex = -1;
-            return -1;
-        }
-
-        // matched before has no duplicates
-        if (currentIndex > 0) {
-            return -1;
-        }
+        // matched before
+        if (moreDuplicates()) return currentRow;
+        if (currentIndex > 0) return -1;
 
         // first access to index, do bsearch
         currentIndex = search(key);
+        // no match
         if (currentIndex < 0) {
             return -1;
         }
-
+        // first call match
         return currentRow;
     }
 
+    private int moreLargerKeys() throws IOException, DataFormatException {
+        // check next elem in array
+        currentIndex++;
+        if (currentIndex < duplicatesOffset) {
+            syncAndGet(currentIndex);
+
+            return currentRow;
+        } else {
+            return -1;
+        }
+    }
+
+    private int moreSmallerKeys() throws IOException, DataFormatException {
+        // check next elem in array
+        currentIndex--;
+        if (currentIndex > 0) {
+            syncAndGet(currentIndex);
+
+            return currentRow;
+        } else {
+            return -1;
+        }
+    }
+
+    private boolean moreDuplicates() throws IOException, DataFormatException {
+        if (currentDuplicateIndex > 0) {
+            syncAndGet();
+            if (currentRow > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // get the values for the current duplicate index
     private void syncAndGet() throws IOException, DataFormatException {
         if (numberOfDuplicatesLeft > 0) {
             currentRow = readInt(currentDuplicateIndex++);
@@ -317,8 +294,9 @@ public class BSearch {
         }
     }
 
-    private void syncAndGet(int offset) throws IOException, DataFormatException {
-        currentRow = readInt(offset);
+    // get the value for the index
+    private void syncAndGet(int index) throws IOException, DataFormatException {
+        currentRow = readInt(index);
 
         if (currentRow < 0) {
             currentDuplicateIndex = duplicatesOffset +
@@ -336,6 +314,19 @@ public class BSearch {
         currentValue = (Key) keys.nextValue();
     }
 
+    /**
+     * Binary search on the keys column.
+     *
+     * To obtain the elements in order the sorted rows array is used.
+     *
+     * @param key the search key
+     * @return on match: the index of the row in the sorted rows array
+     *         on miss : - all keys are smaller: -(duplicatesOffset + 1)
+     *                   - all keys are larger : -1
+     *                   - key is in between   : -(index of next larger element)
+     * @throws IOException
+     * @throws DataFormatException
+     */
     private int search(Key key) throws IOException, DataFormatException {
         int low = 1;
         int high = duplicatesOffset - 1;
@@ -359,9 +350,9 @@ public class BSearch {
     private int readInt(int index) {
         int offset = index * 4;
 
-        return ((rows[offset] & 0xff) << 24) +
-                ((rows[offset + 1] & 0xff) << 16) +
-                ((rows[offset + 2] & 0xff) << 8) +
-                ((rows[offset + 3] & 0xff));
+        return ((sortedRows[offset] & 0xff) << 24) +
+                ((sortedRows[offset + 1] & 0xff) << 16) +
+                ((sortedRows[offset + 2] & 0xff) << 8) +
+                ((sortedRows[offset + 3] & 0xff));
     }
 }
