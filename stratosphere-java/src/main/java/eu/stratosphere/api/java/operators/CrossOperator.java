@@ -14,20 +14,19 @@
  **********************************************************************************************************************/
 package eu.stratosphere.api.java.operators;
 
-import eu.stratosphere.api.common.operators.DualInputOperator;
 import eu.stratosphere.api.java.DataSet;
 import eu.stratosphere.api.java.functions.CrossFunction;
 import eu.stratosphere.api.java.operators.translation.BinaryNodeTranslation;
 import eu.stratosphere.api.java.operators.translation.PlanCrossOperator;
-import eu.stratosphere.api.java.operators.translation.PlanMapOperator;
-import eu.stratosphere.api.java.operators.translation.UnaryNodeTranslation;
 import eu.stratosphere.api.java.typeutils.TypeExtractor;
 import eu.stratosphere.api.java.typeutils.TypeInformation;
 
 /**
  *
  */
-public class CrossOperator<I1, I2, OUT> extends TwoInputUdfOperator<I1, I2, OUT, CrossOperator<I1, I2, OUT>> {
+public class CrossOperator<I1, I2, OUT> 
+	extends TwoInputUdfOperator<I1, I2, OUT, CrossOperator<I1, I2, OUT>> {
+	
 	private final CrossFunction<I1, I2, OUT> function;
 
 	protected CrossOperator(DataSet<I1> input1, DataSet<I2> input2,
@@ -42,7 +41,7 @@ public class CrossOperator<I1, I2, OUT> extends TwoInputUdfOperator<I1, I2, OUT,
 	@Override
 	protected BinaryNodeTranslation translateToDataFlow() {
 		String name = getName() != null ? getName() : function.getClass().getName();
-		return new BinaryNodeTranslation(new PlanCrossOperator<I1, I2, OUT>(function, name));
+		return new BinaryNodeTranslation(new PlanCrossOperator<I1, I2, OUT>(function, name, getInput1Type(), getInput2Type(), getResultType()));
 	}
 	
 

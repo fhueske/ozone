@@ -22,6 +22,7 @@ import eu.stratosphere.api.common.typeutils.Serializer;
 import eu.stratosphere.api.common.typeutils.TypeComparator;
 import eu.stratosphere.api.common.typeutils.TypeComparatorFactory;
 import eu.stratosphere.api.common.typeutils.TypeSerializerFactory;
+import eu.stratosphere.api.java.operators.translation.BinaryJavaPlanNode;
 import eu.stratosphere.api.java.operators.translation.JavaPlanNode;
 import eu.stratosphere.api.java.operators.translation.PlanDataSource;
 import eu.stratosphere.api.java.operators.translation.UnaryJavaPlanNode;
@@ -32,6 +33,7 @@ import eu.stratosphere.api.java.typeutils.runtime.ReferenceWrappedComparator;
 import eu.stratosphere.api.java.typeutils.runtime.ReferenceWrappedSerializer;
 import eu.stratosphere.compiler.CompilerPostPassException;
 import eu.stratosphere.compiler.plan.Channel;
+import eu.stratosphere.compiler.plan.DualInputPlanNode;
 import eu.stratosphere.compiler.plan.OptimizedPlan;
 import eu.stratosphere.compiler.plan.PlanNode;
 import eu.stratosphere.compiler.plan.SingleInputPlanNode;
@@ -248,7 +250,32 @@ public class JavaApiPostPass implements OptimizerPostPass {
 				traverseChannel(c);
 			}
 		}
-//		else if (node instanceof DualInputPlanNode) {
+		else if (node instanceof DualInputPlanNode) {
+			DualInputPlanNode dn = (DualInputPlanNode) node;
+			
+			if (!(dn.getOptimizerNode().getPactContract() instanceof BinaryJavaPlanNode)) {
+				throw new RuntimeException("Wrong operator type found in post pass.");
+			}
+			
+			BinaryJavaPlanNode<?, ?, ?> javaNode = (BinaryJavaPlanNode<?, ?, ?>) dn.getOptimizerNode().getPactContract();
+			
+			// parameterize the node's driver strategy
+			if (dn.getDriverStrategy().requiresComparator()) {
+				dn.setComparator1(createComparator(javaNode.getInputType1(), dn.getKeysForInput1(), 
+					getSortOrders(dn.getKeysForInput1(), dn.getSortOrders())));
+				dn.setComparator2(createComparator(javaNode.getInputType2(), dn.getKeysForInput2(), 
+						getSortOrders(dn.getKeysForInput2(), dn.getSortOrders())));
+			}
+			
+			traverseChannel(dn.getInput1());
+			traverseChannel(dn.getInput2());
+			
+			// don't forget the broadcast inputs
+			for (Channel c: dn.getBroadcastInputs()) {
+				traverseChannel(c);
+			}
+			
+		}
 //			DualInputPlanNode dn = (DualInputPlanNode) node;
 //			
 //			// get the nodes current schema
