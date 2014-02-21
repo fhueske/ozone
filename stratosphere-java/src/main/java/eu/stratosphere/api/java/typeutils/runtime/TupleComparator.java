@@ -103,7 +103,14 @@ public final class TupleComparator<T extends Tuple> extends TypeComparator<T> im
 		this.normalizableKeyPrefixLen = toClone.normalizableKeyPrefixLen;
 		this.invertNormKey = toClone.invertNormKey;
 	}
-
+	
+	public int[] getKeyPositions() {
+		return this.keyPositions;
+	}
+	
+	public TypeComparator<Object>[] getComparators() {
+		return this.comparators;
+	}
 	
 	@Override
 	public int hash(T value) {

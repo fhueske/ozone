@@ -41,6 +41,13 @@ public final class TupleSingleFieldComparator<T extends Tuple, K extends Compara
 		this.comparator = comparator;
 	}
 
+	public int getKeyPosition() {
+		return this.keyPosition;
+	}
+	
+	public TypeComparator<K> getComparator() {
+		return this.comparator;
+	}
 	
 	@Override
 	public int hash(T value) {

@@ -14,7 +14,11 @@
  **********************************************************************************************************************/
 package eu.stratosphere.api.java.typeutils;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import eu.stratosphere.api.common.typeutils.Serializer;
+import eu.stratosphere.api.java.tuple.Tuple;
 import eu.stratosphere.types.Value;
 
 
@@ -31,6 +35,8 @@ public abstract class TypeInformation<T> {
 	public abstract boolean isKeyType();
 	
 	public abstract Serializer<T> createSerializer();
+	
+	protected static final Log LOG = LogFactory.getLog(TypeInformation.class);
 	
 	// --------------------------------------------------------------------------------------------
 	// Static Utilities
@@ -52,7 +58,13 @@ public abstract class TypeInformation<T> {
 			return (TypeInformation<X>) ValueTypeInfo.getValueTypeInfo(valueClass);
 		}
 		
+		// check for subclasses of Tuple
+		if (Tuple.class.isAssignableFrom(clazz)) {
+			LOG.warn("TypeInformation extraction from class for Tuples not supported.");
+		}
+		
 		// return a generic type
 		return new GenericTypeInfo<X>(clazz);
-	}
+	}	
+	
 }

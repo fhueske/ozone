@@ -39,7 +39,10 @@ public class ReferenceWrappedComparator<T> extends TypeComparator<Reference<T>> 
 		this.comparator = comparator;
 	}
 
-
+	public TypeComparator<T> getWrappedComparator() {
+		return this.comparator;
+	}
+	
 	@Override
 	public int hash(Reference<T> record) {
 		return comparator.hash(record.ref);

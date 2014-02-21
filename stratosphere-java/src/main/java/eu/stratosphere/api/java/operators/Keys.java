@@ -43,6 +43,7 @@ public abstract class Keys<T> {
 	public static class FieldPositionKeys<T> extends Keys<T> {
 		
 		private final int[] groupingFields;
+		private final TypeInformation<?>[] types;
 		
 		public FieldPositionKeys(int[] groupingFields, TypeInformation<T> type) {
 			this(groupingFields, type, false);
@@ -56,8 +57,16 @@ public abstract class Keys<T> {
 			if (!allowEmpty && (groupingFields == null || groupingFields.length == 0)) {
 				throw new IllegalArgumentException("The grouping fields must not be empty.");
 			}
+			
+			TupleTypeInfo<?> tupleType = (TupleTypeInfo<?>)type;
 	
 			this.groupingFields = makeFields(groupingFields, (TupleTypeInfo<?>) type);
+			
+			types = new TypeInformation[this.groupingFields.length];
+			for(int i = 0; i < this.groupingFields.length; i++) {
+				types[i] = tupleType.getTypeAt(this.groupingFields[i]);
+			}
+			
 		}
 
 		@Override
@@ -67,7 +76,23 @@ public abstract class Keys<T> {
 
 		@Override
 		public boolean areCompatibale(Keys<?> other) {
-			throw new UnsupportedOperationException();
+			
+			if (other instanceof FieldPositionKeys) {
+				FieldPositionKeys<?> oKey = (FieldPositionKeys<?>) other;
+				
+				if(oKey.types.length != this.types.length) {
+					return false;
+				}
+				for(int i=0; i<this.types.length; i++) {
+					if(!this.types[i].equals(oKey.types[i])) {
+						return false;
+					}
+				}
+				return true;
+				
+			} else {
+				return false;
+			}
 		}
 
 		@Override

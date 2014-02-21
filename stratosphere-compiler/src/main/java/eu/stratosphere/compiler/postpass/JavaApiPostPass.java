@@ -21,6 +21,7 @@ import eu.stratosphere.api.common.operators.util.FieldList;
 import eu.stratosphere.api.common.typeutils.Serializer;
 import eu.stratosphere.api.common.typeutils.TypeComparator;
 import eu.stratosphere.api.common.typeutils.TypeComparatorFactory;
+import eu.stratosphere.api.common.typeutils.TypePairComparatorFactory;
 import eu.stratosphere.api.common.typeutils.TypeSerializerFactory;
 import eu.stratosphere.api.java.operators.translation.BinaryJavaPlanNode;
 import eu.stratosphere.api.java.operators.translation.JavaPlanNode;
@@ -30,6 +31,7 @@ import eu.stratosphere.api.java.typeutils.AtomicType;
 import eu.stratosphere.api.java.typeutils.CompositeType;
 import eu.stratosphere.api.java.typeutils.TypeInformation;
 import eu.stratosphere.api.java.typeutils.runtime.ReferenceWrappedComparator;
+import eu.stratosphere.api.java.typeutils.runtime.ReferenceWrappedPairComparator.ReferenceWrappedPairComparatorFactory;
 import eu.stratosphere.api.java.typeutils.runtime.ReferenceWrappedSerializer;
 import eu.stratosphere.compiler.CompilerPostPassException;
 import eu.stratosphere.compiler.plan.Channel;
@@ -266,9 +268,10 @@ public class JavaApiPostPass implements OptimizerPostPass {
 				dn.setComparator2(createComparator(javaNode.getInputType2(), dn.getKeysForInput2(), 
 						getSortOrders(dn.getKeysForInput2(), dn.getSortOrders())));
 
-				// TODO create and register PairComparatorFactory
+				dn.setPairComparator(createPairComparator(javaNode.getInputType1(), javaNode.getInputType2()));
+				
 			}
-			
+						
 			traverseChannel(dn.getInput1());
 			traverseChannel(dn.getInput2());
 			
@@ -501,6 +504,9 @@ public class JavaApiPostPass implements OptimizerPostPass {
 		return new ReferenceWrappedComparator.ReferenceWrappedComparatorFactory<T>(wrappingComparator);
 	}
 	
+	private static <T1, T2> TypePairComparatorFactory<?,?> createPairComparator(TypeInformation<T1> typeInfo1, TypeInformation<T2> typeInfo2) {
+		return new ReferenceWrappedPairComparatorFactory<T1,T2>();
+	}
 	
 	private static final boolean[] getSortOrders(FieldList keys, boolean[] orders) {
 		if (orders == null) {
