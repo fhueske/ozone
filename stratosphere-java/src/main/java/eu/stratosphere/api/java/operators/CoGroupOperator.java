@@ -18,6 +18,9 @@ import eu.stratosphere.api.common.InvalidProgramException;
 import eu.stratosphere.api.java.DataSet;
 import eu.stratosphere.api.java.functions.CoGroupFunction;
 import eu.stratosphere.api.java.functions.KeySelector;
+import eu.stratosphere.api.java.operators.translation.BinaryNodeTranslation;
+import eu.stratosphere.api.java.operators.translation.PlanCogroupOperator;
+import eu.stratosphere.api.java.operators.translation.PlanCrossOperator;
 import eu.stratosphere.api.java.typeutils.TypeExtractor;
 import eu.stratosphere.api.java.typeutils.TypeInformation;
 
@@ -53,6 +56,12 @@ public class CoGroupOperator<I1, I2, OUT> extends TwoInputUdfOperator<I1, I2, OU
 	
 	protected Keys<I2> getKeys2() {
 		return this.keys2;
+	}
+	
+	@Override
+	protected BinaryNodeTranslation translateToDataFlow() {
+		String name = getName() != null ? getName() : function.getClass().getName();
+		return new BinaryNodeTranslation(new PlanCogroupOperator<I1, I2, OUT>(function, getKeys1().computeLogicalKeyPositions(), getKeys2().computeLogicalKeyPositions(), name, getInput1Type(), getInput2Type(), getResultType()));
 	}
 
 	// --------------------------------------------------------------------------------------------

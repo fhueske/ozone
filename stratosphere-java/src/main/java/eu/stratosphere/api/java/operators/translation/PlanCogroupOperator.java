@@ -21,9 +21,9 @@ public class PlanCogroupOperator<IN1, IN2, OUT>
 	private final TypeInformation<OUT> outType;
 
 	public PlanCogroupOperator(
-			UserCodeWrapper<GenericCoGrouper<Reference<IN1>, Reference<IN2>, Reference<OUT>>> udf,
+			CoGroupFunction<IN1, IN2, OUT> udf,
 			int[] keyPositions1, int[] keyPositions2, String name, TypeInformation<IN1> inType1, TypeInformation<IN2> inType2, TypeInformation<OUT> outType) {
-		super(udf, keyPositions1, keyPositions2, name);
+		super(new ReferenceWrappingCogrouper<IN1, IN2, OUT>(udf), keyPositions1, keyPositions2, name);
 		
 		this.inType1 = inType1;
 		this.inType2 = inType2;
@@ -49,20 +49,7 @@ public class PlanCogroupOperator<IN1, IN2, OUT>
 				final Iterator<Reference<IN2>> records2, final Collector<Reference<OUT>> out)
 				throws Exception {
 			
-			Collector<OUT> refOutCollector = new Collector<OUT>() {
-
-				@Override
-				public void collect(OUT record) {
-					out.collect(new Reference<OUT>(record));
-				}
-				
-				@Override
-				public void close() {
-					out.close();
-				}
-			};
-			
-			this.wrappedFunction.coGroup(new UnwrappingIterator<IN1>(records1), new UnwrappingIterator<IN2>(records2), refOutCollector);
+			this.wrappedFunction.coGroup(new UnwrappingIterator<IN1>(records1), new UnwrappingIterator<IN2>(records2), new UnwrappingCollector<OUT>(out));
 			
 		}
 
@@ -70,16 +57,16 @@ public class PlanCogroupOperator<IN1, IN2, OUT>
 		@Override
 		public void combineFirst(Iterator<Reference<IN1>> records,
 				Collector<Reference<IN1>> out) throws Exception {
-			// TODO Auto-generated method stub
 			
+			this.wrappedFunction.combineFirst(new UnwrappingIterator<IN1>(records), new UnwrappingCollector<IN1>(out));
 		}
 
 
 		@Override
 		public void combineSecond(Iterator<Reference<IN2>> records,
 				Collector<Reference<IN2>> out) throws Exception {
-			// TODO Auto-generated method stub
-			
+
+			this.wrappedFunction.combineSecond(new UnwrappingIterator<IN2>(records), new UnwrappingCollector<IN2>(out));
 		}
 	}
 
