@@ -240,7 +240,7 @@ public abstract class JoinOperator<I1, I2, OUT> extends TwoInputUdfOperator<I1, 
 			return new JoinOperatorSetsPredicate(new Keys.FieldPositionKeys<I1>(fields, input1.getType()));
 		}
 		
-		public <K extends Comparable<K>> JoinOperatorSetsPredicate where(KeySelector<I1, K> keyExtractor) {
+		public <K extends Comparable<K>> KeyedJoinOperatorSetsPredicate where(KeySelector<I1, K> keyExtractor) {
 			return new KeyedJoinOperatorSetsPredicate<K>(new Keys.SelectorFunctionKeys<I1, K>(keyExtractor, input1.getType()));
 		}
 		
@@ -268,7 +268,6 @@ public abstract class JoinOperator<I1, I2, OUT> extends TwoInputUdfOperator<I1, 
 			
 			public DefaultJoin<I1, I2> equalTo(int... fields) {
 				return createJoinOperator(new Keys.FieldPositionKeys<I2>(fields, input2.getType()));
-				
 			}
 
 			public DefaultJoin<I1, I2> equalTo(String keyExpression) {
