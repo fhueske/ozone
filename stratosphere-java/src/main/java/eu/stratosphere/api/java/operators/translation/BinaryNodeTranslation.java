@@ -28,7 +28,7 @@ public class BinaryNodeTranslation {
 	
 	private final DualInputOperator<?> binaryInputOperator;
 	
-	private final Operator outputOperator;
+	private final DualInputOperator<?> outputOperator;
 
 	
 	public BinaryNodeTranslation(DualInputOperator<?> operator) {
@@ -38,7 +38,7 @@ public class BinaryNodeTranslation {
 		this.outputOperator = operator;
 	}
 	
-	public BinaryNodeTranslation(SingleInputOperator<?> input1, SingleInputOperator<?> input2, Operator output) {
+	public BinaryNodeTranslation(SingleInputOperator<?> input1, SingleInputOperator<?> input2, DualInputOperator<?>  output) {
 		this.input1Operator = input1;
 		this.input2Operator = input2;
 		this.binaryInputOperator = null;
@@ -62,7 +62,7 @@ public class BinaryNodeTranslation {
 		}
 	}
 	
-	public Operator getOutputOperator() {
+	public DualInputOperator<?> getOutputOperator() {
 		return outputOperator;
 	}
 }

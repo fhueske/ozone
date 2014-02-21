@@ -24,6 +24,7 @@ import eu.stratosphere.api.common.operators.GenericDataSink;
 import eu.stratosphere.api.common.operators.GenericDataSource;
 import eu.stratosphere.api.common.operators.Operator;
 import eu.stratosphere.api.java.DataSet;
+import eu.stratosphere.api.java.operators.translation.BinaryNodeTranslation;
 import eu.stratosphere.api.java.operators.translation.JavaPlan;
 import eu.stratosphere.api.java.operators.translation.UnaryNodeTranslation;
 
@@ -98,23 +99,26 @@ public class OperatorTranslation {
 		// translate the operation itself
 		UnaryNodeTranslation translated = op.translateToDataFlow();
 
-		// translate the input
+		// translate and connect the input
 		Operator input = translate(op.getInput());
-		translated.getInputOperator().setInput(input);
+		translated.setInput(input);
 		
 		return translated.getOutputOperator();
 	}
 	
 	private eu.stratosphere.api.common.operators.DualInputOperator<?> translateBinaryOp(TwoInputOperator<?, ?, ?, ?> op) {
-		eu.stratosphere.api.common.operators.DualInputOperator<?> dataFlowOp = op.translateToDataFlow();
+		// translate the operation itself
+		BinaryNodeTranslation translated = op.translateToDataFlow();
 		
+		// translate its inputs
 		Operator input1 = translate(op.getInput1());
 		Operator input2 = translate(op.getInput2());
 		
-		dataFlowOp.setFirstInput(input1);
-		dataFlowOp.setSecondInput(input2);
+		// connect the inputs
+		translated.setInput1(input1);
+		translated.setInput2(input2);
 		
-		return dataFlowOp;
+		return translated.getOutputOperator();
 	}
 	
 	private void translateBcVariables(DataSet<?> setOrOp, Operator dataFlowOp) {

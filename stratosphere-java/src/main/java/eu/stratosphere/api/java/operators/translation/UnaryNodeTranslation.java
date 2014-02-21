@@ -14,6 +14,7 @@
  **********************************************************************************************************************/
 package eu.stratosphere.api.java.operators.translation;
 
+import eu.stratosphere.api.common.operators.Operator;
 import eu.stratosphere.api.common.operators.SingleInputOperator;
 
 
@@ -34,9 +35,8 @@ public class UnaryNodeTranslation {
 		this.outputOperator = outputOperator;
 	}
 
-	
-	public SingleInputOperator<?> getInputOperator() {
-		return inputOperator;
+	public void setInput(Operator op) {
+		inputOperator.setInput(op);
 	}
 	
 	public SingleInputOperator<?> getOutputOperator() {
